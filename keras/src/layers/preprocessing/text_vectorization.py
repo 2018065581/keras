@@ -540,7 +540,7 @@ class TextVectorization(Layer):
                 )
             if callable(self._standardize):
                 if backend.backend() != "tensorflow" and tf.executing_eagerly():
-                    inputs_np = backend.convert_to_numpy(inputs)
+                    inputs_np = inputs.numpy()
 
                     def standardize_element(x):
                         if isinstance(x, bytes):
@@ -562,6 +562,8 @@ class TextVectorization(Layer):
                     inputs = tf_utils.ensure_tensor(res, dtype=tf.string)
                 else:
                     inputs = self._standardize(inputs)
+                    if backend.backend() != "tensorflow":
+                        inputs = tf_utils.ensure_tensor(inputs, dtype=tf.string)
 
             if self._split is not None:
                 # If we are splitting, we validate that the 1st axis is of
@@ -590,7 +592,7 @@ class TextVectorization(Layer):
                         backend.backend() != "tensorflow"
                         and tf.executing_eagerly()
                     ):
-                        inputs_np = backend.convert_to_numpy(inputs)
+                        inputs_np = inputs.numpy()
 
                         def split_element(x):
                             if isinstance(x, bytes):
@@ -598,17 +600,25 @@ class TextVectorization(Layer):
                             res = self._split(x)
                             if isinstance(res, tf.Tensor):
                                 res = res.numpy()
-                            # res can be a list of strings/bytes
                             return res
 
                         if inputs_np.ndim == 0:
                             res = split_element(inputs_np.item())
+                            inputs = tf_utils.ensure_tensor(res, dtype=tf.string)
                         else:
-                            vfunc = np.vectorize(split_element, otypes=[object])
-                            res = vfunc(inputs_np).tolist()
-                        inputs = tf_utils.ensure_tensor(res, dtype=tf.string)
+                            res_list = [split_element(x) for x in inputs_np]
+                            try:
+                                inputs = tf.ragged.constant(
+                                    res_list, dtype=tf.string
+                                )
+                            except Exception:
+                                inputs = tf.constant(res_list, dtype=tf.string)
                     else:
                         inputs = self._split(inputs)
+                        if backend.backend() != "tensorflow":
+                            inputs = tf_utils.ensure_tensor(
+                                inputs, dtype=tf.string
+                            )
 
             # Note that 'inputs' here can be either ragged or dense depending
             # on the configuration choices for this Layer. The strings.ngrams
